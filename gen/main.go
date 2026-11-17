@@ -17,11 +17,13 @@ import (
 var tmpl string
 
 var (
-	schemaPath     string
-	yamlPaths      StringListFlag
-	outJsonPaths   StringListFlag
-	outHeaderPaths StringListFlag
-	extPrefix      bool
+	schemaPath      string
+	yamlPaths       StringListFlag
+	outJsonPaths    StringListFlag
+	outHeaderPaths  StringListFlag
+	outCSharpPaths  StringListFlag
+	csharpNamespace string
+	extPrefix       bool
 )
 
 func main() {
@@ -29,9 +31,15 @@ func main() {
 	flag.Var(&yamlPaths, "yaml", "path of the yaml spec")
 	flag.Var(&outJsonPaths, "out-json", "output path of the json version of the yaml")
 	flag.Var(&outHeaderPaths, "out-header", "output path of the header")
+	flag.Var(&outCSharpPaths, "out-csharp", "output path of the C# bindings (optional)")
+	flag.StringVar(&csharpNamespace, "csharp-namespace", "WebGPU", "namespace of the generated C# bindings")
 	flag.BoolVar(&extPrefix, "ext-prefix", true, "append prefix to extension identifiers")
 	flag.Parse()
-	if schemaPath == "" || len(yamlPaths) == 0 || len(outHeaderPaths) != len(yamlPaths) || len(outJsonPaths) != len(yamlPaths) {
+	// Each output kind is optional, but when given it needs one path per yaml.
+	validOutputs := func(paths StringListFlag) bool { return len(paths) == 0 || len(paths) == len(yamlPaths) }
+	if schemaPath == "" || len(yamlPaths) == 0 ||
+		!validOutputs(outHeaderPaths) || !validOutputs(outJsonPaths) || !validOutputs(outCSharpPaths) ||
+		len(outHeaderPaths)+len(outJsonPaths)+len(outCSharpPaths) == 0 {
 		flag.Usage()
 		os.Exit(1)
 	}
@@ -46,27 +54,15 @@ func main() {
 		panic(err)
 	}
 
-	// Generate the header files
+	// Generate the output files
 	for i, yamlPath := range yamlPaths {
-		outHeaderPath := outHeaderPaths[i]
-		outHeaderFileName := filepath.Base(outHeaderPath)
-		outHeaderFileNameSplit := strings.Split(outHeaderFileName, ".")
-		if len(outHeaderFileNameSplit) != 2 {
-			panic("got invalid out-header file name: " + outHeaderFileName)
-		}
-
-		outJsonPath := outJsonPaths[i]
-
 		src, err := os.ReadFile(yamlPath)
 		if err != nil {
 			panic(err)
 		}
 
-		ConvertToJSON(src, outJsonPath)
-
-		dst, err := os.Create(outHeaderPath)
-		if err != nil {
-			panic(err)
+		if len(outJsonPaths) > 0 {
+			ConvertToJSON(src, outJsonPaths[i])
 		}
 
 		var yml Yml
@@ -77,12 +73,39 @@ func main() {
 		SortAndTransform(&yml)
 
 		g := &Generator{
-			Yml:          &yml,
-			HeaderName:   outHeaderFileNameSplit[0],
-			UseExtPrefix: extPrefix,
+			Yml:             &yml,
+			UseExtPrefix:    extPrefix,
+			CSharpNamespace: csharpNamespace,
 		}
-		if err := g.Gen(dst); err != nil {
-			panic(err)
+
+		if len(outHeaderPaths) > 0 {
+			outHeaderPath := outHeaderPaths[i]
+			outHeaderFileName := filepath.Base(outHeaderPath)
+			outHeaderFileNameSplit := strings.Split(outHeaderFileName, ".")
+			if len(outHeaderFileNameSplit) != 2 {
+				panic("got invalid out-header file name: " + outHeaderFileName)
+			}
+			g.HeaderName = outHeaderFileNameSplit[0]
+
+			dst, err := os.Create(outHeaderPath)
+			if err != nil {
+				panic(err)
+			}
+			if err := g.Gen(dst); err != nil {
+				panic(err)
+			}
+			dst.Close()
+		}
+
+		if len(outCSharpPaths) > 0 {
+			dst, err := os.Create(outCSharpPaths[i])
+			if err != nil {
+				panic(err)
+			}
+			if err := g.GenCSharp(dst); err != nil {
+				panic(err)
+			}
+			dst.Close()
 		}
 	}
 }

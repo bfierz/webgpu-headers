@@ -12,8 +12,9 @@ import (
 )
 
 type Generator struct {
-	UseExtPrefix bool
-	HeaderName   string
+	UseExtPrefix    bool
+	HeaderName      string
+	CSharpNamespace string
 	*Yml
 }
 
